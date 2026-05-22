@@ -316,7 +316,7 @@ const PlaygroundEditor = ({
         const binding = new MonacoBinding(
           yText,
           model,
-          new Set([editorRef.current]),
+          new Set(editorRef.current ? [editorRef.current] : []),
           provider.awareness,
         );
 
@@ -481,7 +481,6 @@ const PlaygroundEditor = ({
             ? getEditorLanguage(activeFile.fileExtension || "")
             : "plaintext"
         }
-        // @ts-expect-error - Monaco options typo
         options={{
           ...defaultEditorOptions,
           inlineSuggest: { enabled: true },
