@@ -173,11 +173,11 @@ export const SaveUpdatedCode = async (
         playgroundId,
       },
       update: {
-        content: data as Prisma.InputJsonValue,
+        content: data as unknown as Prisma.InputJsonValue,
       },
       create: {
         playgroundId,
-        content: data as Prisma.InputJsonValue,
+        content: data as unknown as Prisma.InputJsonValue,
       },
     });
 

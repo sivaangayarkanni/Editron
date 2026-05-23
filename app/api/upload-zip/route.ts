@@ -20,6 +20,7 @@ interface TemplateFile {
 interface TemplateFolder {
     folderName: string;
     items: (TemplateFile | TemplateFolder)[];
+    content?: string;
 }
 
 // Binary / large file extensions to skip
