@@ -165,7 +165,7 @@ export const getPlaygroundById = async (id: string) => {
  * Normalizes an object to be JSON-safe by stripping undefined values.
  * Useful for Prisma JSON fields which don't support undefined.
  */
-function normalizeJson<T>(obj: T): any {
+function normalizeJson<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
 }
 
