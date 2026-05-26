@@ -60,7 +60,7 @@ export default function KPIStats({ stats }: KPIStatsProps) {
     return (
         <div className="grid w-full grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
             {statItems.map((item, index) => (
-                <StatCard key={index} {...item} delay={index * 0.1} />
+                <StatCard key={item.label} {...item} delay={index * 0.1} />
             ))}
         </div>
     );

@@ -14,6 +14,7 @@ import { Plus, Trash2, KeyRound, Save } from "lucide-react";
 import { toast } from "sonner";
 
 interface EnvVar {
+    id: string;
     key: string;
     value: string;
 }
@@ -61,6 +62,7 @@ export function EnvManager({
                     const splitIdx = trimmed.indexOf("=");
                     if (splitIdx > -1) {
                         parsedVars.push({
+                            id: Math.random().toString(36).substring(2, 9),
                             key: trimmed.substring(0, splitIdx).trim(),
                             value: trimmed.substring(splitIdx + 1).trim()
                         });
@@ -94,7 +96,7 @@ export function EnvManager({
     const hasErrors = hasEmptyKey || hasInvalidKey || hasDuplicate;
 
     const handleAddVar = () => {
-        setEnvVars([...envVars, { key: "", value: "" }]);
+        setEnvVars([...envVars, { id: Math.random().toString(36).substring(2, 9), key: "", value: "" }]);
     };
 
     const handleRemoveVar = (index: number) => {
@@ -177,7 +179,7 @@ export function EnvManager({
 
                             return (
                                 <div
-                                    key={idx}
+                                    key={v.id}
                                     className={`flex items-center gap-1.5 border p-1.5 rounded bg-muted/20 ${
                                         itemHasError ? "border-destructive/40 bg-destructive/5" : "border-border"
                                     }`}
