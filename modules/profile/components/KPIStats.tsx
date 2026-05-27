@@ -12,13 +12,21 @@ interface KPIStatsProps {
     };
 }
 
+type KpiColor = "blue" | "amber" | "orange";
+
 interface StatCardProps {
     icon: LucideIcon;
     label: string;
     value: string | number;
-    color: string;
+    color: KpiColor;
     delay: number;
 }
+
+const colorStyles: Record<KpiColor, { bg: string; text: string; ring: string }> = {
+    blue: { bg: "bg-blue-500/10", text: "text-blue-500", ring: "ring-blue-500/20" },
+    amber: { bg: "bg-amber-500/10", text: "text-amber-500", ring: "ring-amber-500/20" },
+    orange: { bg: "bg-orange-500/10", text: "text-orange-500", ring: "ring-orange-500/20" },
+};
 
 const StatCard = ({ icon: Icon, label, value, color, delay }: StatCardProps) => (
     <motion.div
@@ -30,14 +38,14 @@ const StatCard = ({ icon: Icon, label, value, color, delay }: StatCardProps) => 
         <Card className="relative min-w-0 w-full overflow-hidden border-border/50 hover:border-border transition-all duration-300 group hover:shadow-lg dark:hover:shadow-primary/5">
             <CardContent className="min-w-0 p-4 sm:p-6">
                 {/* Background Icon */}
-                <div className={`absolute -right-4 -top-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity duration-300 text-${color}-500 transform rotate-12`}>
+                <div className={`absolute -right-4 -top-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity duration-300 ${colorStyles[color].text} transform rotate-12`}>
                     <Icon size={120} />
                 </div>
 
                 {/* Content */}
                 <div className="relative z-10 flex min-w-0 flex-col justify-between h-full">
                     <div className="flex items-center justify-between mb-4">
-                        <div className={`p-2.5 rounded-xl bg-${color}-500/10 text-${color}-500 ring-1 ring-${color}-500/20`}>
+                        <div className={`p-2.5 rounded-xl ${colorStyles[color].bg} ${colorStyles[color].text} ring-1 ${colorStyles[color].ring}`}>
                             <Icon size={20} />
                         </div>
                     </div>
@@ -55,7 +63,12 @@ const StatCard = ({ icon: Icon, label, value, color, delay }: StatCardProps) => 
 );
 
 export default function KPIStats({ stats }: KPIStatsProps) {
-    const statItems = [
+    const statItems: Array<{
+        icon: LucideIcon;
+        label: string;
+        value: string | number;
+        color: KpiColor;
+    }> = [
         { icon: Folder, label: "Total Projects", value: stats.totalProjects, color: "blue" },
         { icon: Star, label: "Starred", value: stats.starredProjects, color: "amber" },
         { icon: Zap, label: "Active Days Streak", value: `${stats.currentStreak} Days`, color: "orange" },
