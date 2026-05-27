@@ -23,6 +23,7 @@ import type {
   TemplateFolder,
 } from "@/modules/playground/lib/path-to-json";
 import { useCollaboratorCount } from "@/modules/playground/hooks/useCollaboratorCount";
+import { useYjsWebContainerSync } from "@/modules/playground/hooks/useYjsWebContainerSync";
 
 const PlaygroundEditor = dynamic(
   () => import("@/modules/playground/components/playground-editor"),
@@ -77,6 +78,9 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
 
   const activeFile = openFiles.find((file) => file.id === activeFileId);
   const collaboratorCount = useCollaboratorCount(id);
+
+  // Sync Yjs remote changes directly to WebContainer for live preview
+  useYjsWebContainerSync(id, templateData, writeFileSync);
 
   // Auto-open default file when preview is shown if no file is open
   useEffect(() => {
