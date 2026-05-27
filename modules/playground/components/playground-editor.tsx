@@ -4,6 +4,7 @@ import { EDITOR_CONFIG } from "@/lib/constants/config";
 import { useRef, useEffect, useState } from "react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import type { editor as MonacoEditor } from "monaco-editor";
+import { KeyCode } from "monaco-editor";
 import {
   configureMonaco,
   defaultEditorOptions,
@@ -59,6 +60,23 @@ const PlaygroundEditor = ({
       ...defaultEditorOptions,
       inlineSuggest: { enabled: true },
     });
+
+    // Explicitly add keyboard controls for inline AI suggestions
+    editor.addCommand(
+      KeyCode.Tab,
+      () => {
+        editor.trigger("keyboard", "editor.action.inlineSuggest.commit", {});
+      },
+      "inlineSuggestionVisible"
+    );
+
+    editor.addCommand(
+      KeyCode.Escape,
+      () => {
+        editor.trigger("keyboard", "editor.action.inlineSuggest.hide", {});
+      },
+      "inlineSuggestionVisible"
+    );
 
     // Cursor position tracking for status bar
     editor.onDidChangeCursorPosition((e) => {
