@@ -20,9 +20,15 @@ import prettierPluginPostcss from "prettier/plugins/postcss";
 import prettierPluginTypeScript from "prettier/plugins/typescript";
 
 import { MonacoBinding } from "y-monaco";
-import { fetchCollabToken, getOrCreateYDoc, destroyYDoc } from "@/lib/yjs";
+import { fetchCollabToken, getOrCreateYDoc } from "@/lib/yjs";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+
+// Module-scoped guards and disposables for singleton registrations
+let inlineProviderRegistered = false;
+let formatterRegistered = false;
+let inlineProviderDisposable: { dispose: () => void } | null = null;
+let formatterDisposable: { dispose: () => void } | null = null;
 
 export interface PlaygroundEditorProps {
   activeFile: TemplateFile | undefined;
@@ -37,10 +43,6 @@ const PlaygroundEditor = ({
   onContentChange,
   onCursorChange,
 }: PlaygroundEditorProps) => {
-  const inlineProviderDisposableRef = useRef<{ dispose: () => void } | null>(
-    null,
-  );
-  const formatterDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const params = useParams();
   const playgroundId = params?.id as string;
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
@@ -50,7 +52,10 @@ const PlaygroundEditor = ({
   const { data: session } = useSession();
   const [isMounted, setIsMounted] = useState(false);
 
-  const handleEditorDidMount = (editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco) => {
+  const handleEditorDidMount = (
+    editor: MonacoEditor.IStandaloneCodeEditor,
+    monaco: Monaco,
+  ) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     setIsMounted(true);
@@ -72,9 +77,12 @@ const PlaygroundEditor = ({
   };
 
   const registerPrettierFormatter = (monaco: Monaco) => {
-    if (formatterDisposableRef.current) {
-      formatterDisposableRef.current.dispose();
-      formatterDisposableRef.current = null;
+    // Singleton guard: only register once globally
+    if (formatterRegistered) return;
+
+    if (formatterDisposable) {
+      formatterDisposable.dispose();
+      formatterDisposable = null;
     }
 
     const languages = ["javascript", "typescript", "html", "css", "json"];
@@ -138,19 +146,24 @@ const PlaygroundEditor = ({
       }),
     );
 
-    formatterDisposableRef.current = {
+    formatterDisposable = {
       dispose: () => disposables.forEach((d) => d.dispose()),
     };
+
+    formatterRegistered = true;
   };
 
   const registerInlineCompletionProvider = (monaco: Monaco) => {
+    // Singleton guard: only register once globally
+    if (inlineProviderRegistered) return;
+
     // Dispose previous provider if exists
-    if (inlineProviderDisposableRef.current) {
-      inlineProviderDisposableRef.current.dispose();
-      inlineProviderDisposableRef.current = null;
+    if (inlineProviderDisposable) {
+      inlineProviderDisposable.dispose();
+      inlineProviderDisposable = null;
     }
 
-    inlineProviderDisposableRef.current =
+    inlineProviderDisposable =
       monaco.languages.registerInlineCompletionsProvider(
         { pattern: "**" },
         {
@@ -251,6 +264,8 @@ const PlaygroundEditor = ({
           freeInlineCompletions: () => {},
         },
       );
+
+    inlineProviderRegistered = true;
   };
 
   const updateEditorLanguage = () => {
@@ -344,7 +359,9 @@ const PlaygroundEditor = ({
           }
 
           const states = Array.from(
-            provider.awareness.getStates().entries() as Iterable<[number, { user?: { color?: string; name?: string } }]>,
+            provider.awareness.getStates().entries() as Iterable<
+              [number, { user?: { color?: string; name?: string } }]
+            >,
           );
           let css = "";
 
@@ -412,27 +429,17 @@ const PlaygroundEditor = ({
     };
   }, [activeFile, playgroundId, isMounted, content, session]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount - only binding cleanup, providers are global singletons
   useEffect(() => {
     return () => {
-      if (inlineProviderDisposableRef.current) {
-        inlineProviderDisposableRef.current.dispose();
-        inlineProviderDisposableRef.current = null;
-      }
-
-      if (formatterDisposableRef.current) {
-        formatterDisposableRef.current.dispose();
-        formatterDisposableRef.current = null;
-      }
+      // Provider disposals removed - they are global singletons that should persist
+      // Only clean up the binding for this editor instance
       if (bindingRef.current) {
         bindingRef.current.destroy();
         bindingRef.current = null;
       }
-      if (playgroundId) {
-        destroyYDoc(playgroundId);
-      }
     };
-  }, [playgroundId]);
+  }, []);
 
   const { editorTheme } = useAI();
 
@@ -484,6 +491,7 @@ const PlaygroundEditor = ({
         options={{
           ...defaultEditorOptions,
           inlineSuggest: { enabled: true },
+          automaticLayout: true,
         }}
       />
     </div>
