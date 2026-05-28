@@ -13,8 +13,9 @@ export const PlaygroundSidebar = () => {
     const [activeTab, setActiveTab] = useState<"explorer" | "packages" | "env">("explorer");
     const { state } = useSidebar();
     const { templateData, instance, writeFileSync } = usePlaygroundContext();
-    const { openFiles, activeFileId, openFile } = useFileExplorer();
-    const activeFile = openFiles.find((file) => file.id === activeFileId) || null;
+    const { openFiles, activeFileId, secondaryActiveFileId, focusedPane, openFile } = useFileExplorer();
+    const currentActiveId = focusedPane === 'primary' ? activeFileId : secondaryActiveFileId;
+    const activeFile = openFiles.find((file) => file.id === currentActiveId) || null;
 
     const {
         wrappedHandleAddFile,
