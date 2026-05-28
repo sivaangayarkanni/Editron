@@ -17,7 +17,8 @@ import {
     Settings,
     XCircle,
     FolderDown,
-    Menu
+    Menu,
+    Clock
 } from "lucide-react";
 
 import { usePlaygroundContext } from "@/modules/playground/contexts/playground-context";
@@ -41,7 +42,9 @@ export const PlaygroundHeader = ({
         isPreviewVisible,
         setIsPreviewVisible,
         setIsDeployDialogOpen,
-        setShowAISettings
+        setShowAISettings,
+        toggleTimeTravel,
+        isTimeTravelOpen
     } = usePlaygroundUI();
     const { openFiles, activeFileId, closeAllFiles } = useFileExplorer();
     
@@ -162,6 +165,21 @@ export const PlaygroundHeader = ({
                 </Tooltip>
 
                 <ThemeSelector />
+
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-8 w-8 ${isTimeTravelOpen ? "text-blue-500 bg-blue-500/10" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                            onClick={toggleTimeTravel}
+                            aria-label="Code Time Travel"
+                        >
+                            <Clock className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Code Time Travel</TooltipContent>
+                </Tooltip>
 
                 <Tooltip>
                     <TooltipTrigger asChild>
