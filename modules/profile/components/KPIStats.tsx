@@ -1,7 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Folder, Star, Zap, LucideIcon } from "lucide-react";
+import {
+    Folder,
+    Star,
+    Zap,
+    LucideIcon,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 interface KPIStatsProps {
@@ -12,21 +17,13 @@ interface KPIStatsProps {
     };
 }
 
-type KpiColor = "blue" | "amber" | "orange";
-
 interface StatCardProps {
     icon: LucideIcon;
     label: string;
     value: string | number;
-    color: KpiColor;
+    color: string;
     delay: number;
 }
-
-const colorStyles: Record<KpiColor, { bg: string; text: string; ring: string }> = {
-    blue: { bg: "bg-blue-500/10", text: "text-blue-500", ring: "ring-blue-500/20" },
-    amber: { bg: "bg-amber-500/10", text: "text-amber-500", ring: "ring-amber-500/20" },
-    orange: { bg: "bg-orange-500/10", text: "text-orange-500", ring: "ring-orange-500/20" },
-};
 
 const StatCard = ({ icon: Icon, label, value, color, delay }: StatCardProps) => (
     <motion.div
