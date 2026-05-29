@@ -13,6 +13,7 @@ import { create } from "zustand";
 interface PlaygroundUIState {
   isPreviewVisible: boolean;
   showAISettings: boolean;
+  showPreferences: boolean;
   isCommandPaletteOpen: boolean;
   isDeployDialogOpen: boolean;
   isTimeTravelOpen: boolean;
@@ -21,6 +22,7 @@ interface PlaygroundUIState {
   // Actions
   setIsPreviewVisible: (v: boolean | ((prev: boolean) => boolean)) => void;
   setShowAISettings: (v: boolean) => void;
+  setShowPreferences: (v: boolean) => void;
   setIsCommandPaletteOpen: (v: boolean) => void;
   setIsDeployDialogOpen: (v: boolean) => void;
   setIsTimeTravelOpen: (v: boolean) => void;
@@ -33,6 +35,7 @@ interface PlaygroundUIState {
 export const usePlaygroundUI = create<PlaygroundUIState>((set) => ({
   isPreviewVisible: false,
   showAISettings: false,
+  showPreferences: false,
   isCommandPaletteOpen: false,
   isDeployDialogOpen: false,
   isTimeTravelOpen: false,
@@ -43,6 +46,7 @@ export const usePlaygroundUI = create<PlaygroundUIState>((set) => ({
       isPreviewVisible: typeof v === "function" ? v(s.isPreviewVisible) : v,
     })),
   setShowAISettings: (v) => set({ showAISettings: v }),
+  setShowPreferences: (v) => set({ showPreferences: v }),
   setIsCommandPaletteOpen: (v) => set({ isCommandPaletteOpen: v }),
   setIsDeployDialogOpen: (v) => set({ isDeployDialogOpen: v }),
   setIsTimeTravelOpen: (v) => set({ isTimeTravelOpen: v }),
@@ -55,6 +59,7 @@ export const usePlaygroundUI = create<PlaygroundUIState>((set) => ({
     set({
       isPreviewVisible: false,
       showAISettings: false,
+      showPreferences: false,
       isCommandPaletteOpen: false,
       isDeployDialogOpen: false,
       isTimeTravelOpen: false,
