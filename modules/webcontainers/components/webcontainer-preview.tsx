@@ -145,8 +145,6 @@ const WebContainerPreview = ({
       write(data: string) {
         if (terminalRef.current) {
           writeTerminal(data);
-        } else {
-          console.log("[WebContainer Install] ", data.trim());
         }
 
         const now = Date.now();
@@ -969,12 +967,21 @@ const WebContainerPreview = ({
                   }}
                   title="Refresh preview"
                 >
+ feat/split-view-editor
                   <RefreshCw
                     size={13}
                     className={
                       !isSetupComplete ? "animate-spin text-primary" : ""
                     }
                   />
+
+                    <RefreshCw
+                      size={13}
+                      className={
+                        isLoading ? "animate-spin text-primary" : ""
+                      }
+                    />
+ develop
                 </Button>
               </div>
             </div>

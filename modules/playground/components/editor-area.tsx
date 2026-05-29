@@ -23,6 +23,7 @@ import type {
   TemplateFolder,
 } from "@/modules/playground/lib/path-to-json";
 import { useCollaboratorCount } from "@/modules/playground/hooks/useCollaboratorCount";
+import { useYjsWebContainerSync } from "@/modules/playground/hooks/useYjsWebContainerSync";
 
 const PlaygroundEditor = dynamic(
   () => import("@/modules/playground/components/playground-editor"),
@@ -57,17 +58,6 @@ interface EditorAreaProps {
   handleDownloadZip: () => void;
 }
 
-/**
- * Encapsulates the full editor content area:
- * - Tab bar
- * - Breadcrumbs
- * - Monaco editor + resizable preview panel
- * - Welcome screen (when no files are open)
- * - Status bar
- *
- * Consumes `useFileExplorer`, `usePlaygroundUI`, and `PlaygroundContext`
- * directly — no prop-drilling from the parent page.
- */
 export const EditorArea: React.FC<EditorAreaProps> = ({
   handleDownloadZip,
 }) => {
@@ -92,7 +82,20 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     setActiveFileId: globalSetActiveFileId,
     closeFile: globalCloseFile,
     openFile,
+feat/split-view-editor
     updateFileContent: globalUpdateFileContent,
+    
+    updateFileContent,
+    
+    // Split View State
+    splitLayout,
+    setSplitLayout,
+    focusedPane,
+    setFocusedPane,
+    primaryPaneFiles,
+    secondaryPaneFiles,
+    secondaryActiveFileId,
+develop
   } = useFileExplorer();
 
   const {
@@ -217,7 +220,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     setEditorPanes,
   ]);
 
-  // Derive container status
   const containerStatus: "idle" | "building" | "running" | "error" =
     containerError
       ? "error"
@@ -226,6 +228,13 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
         : serverUrl
           ? "running"
           : "idle";
+
+  const primaryTabs = openFiles.filter(f => primaryPaneFiles.includes(f.id));
+  const secondaryTabs = openFiles.filter(f => secondaryPaneFiles.includes(f.id));
+
+  const toggleSplitLayout = () => {
+    setSplitLayout(splitLayout === 'none' ? 'horizontal' : splitLayout === 'horizontal' ? 'vertical' : 'none');
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)]">
@@ -354,7 +363,6 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
         )}
       </div>
 
-      {/* Status Bar */}
       <StatusBar
         activeFile={openFiles.find(
           (f) =>
