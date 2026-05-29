@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { TemplateFile, TemplateFolder } from "../lib/path-to-json";
+import type { TemplateFile } from "../lib/path-to-json";
 import {
   collectFilePaths,
   deleteFileByPath,
