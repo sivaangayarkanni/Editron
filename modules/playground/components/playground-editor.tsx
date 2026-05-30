@@ -272,7 +272,7 @@ const PlaygroundEditor = ({
       );
   };
 
-  const updateEditorLanguage = () => {
+  const updateEditorLanguage = useCallback(() => {
     if (!activeFile || !monacoRef.current || !editorRef.current) return;
     const model = editorRef.current.getModel();
     if (!model) return;
@@ -283,12 +283,11 @@ const PlaygroundEditor = ({
     } catch (error) {
       console.warn("Failed to set editor language:", error);
     }
-  };
+  }, [activeFile]);
 
   useEffect(() => {
     updateEditorLanguage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFile]);
+  }, [updateEditorLanguage]);
 
   // Bind Yjs to Monaco
   useEffect(() => {
