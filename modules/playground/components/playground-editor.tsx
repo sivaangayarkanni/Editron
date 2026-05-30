@@ -22,9 +22,22 @@ import prettierPluginPostcss from "prettier/plugins/postcss";
 import prettierPluginTypeScript from "prettier/plugins/typescript";
 
 import { MonacoBinding } from "y-monaco";
-import { fetchCollabToken, getOrCreateYDoc, destroyYDoc } from "@/lib/yjs";
+import { fetchCollabToken, getOrCreateYDoc } from "@/lib/yjs";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+
+// Module-scoped guards for singleton registrations
+let inlineProviderRegistered = false;
+let formatterRegistered = false;
+
+// Module-scoped debounce map for per-model debouncing in split-view
+const inlineCompletionDebounce = new Map<
+  string,
+  {
+    timer: ReturnType<typeof setTimeout>;
+    resolve: () => void;
+  }
+>();
 
 export interface PlaygroundEditorProps {
   activeFile: TemplateFile | undefined;
@@ -39,20 +52,18 @@ const PlaygroundEditor = ({
   onContentChange,
   onCursorChange,
 }: PlaygroundEditorProps) => {
-  const inlineProviderDisposableRef = useRef<{ dispose: () => void } | null>(
-    null,
-  );
-  const formatterDisposableRef = useRef<{ dispose: () => void } | null>(null);
   const params = useParams();
   const playgroundId = params?.id as string;
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bindingRef = useRef<{ destroy: () => void } | null>(null);
   const { data: session } = useSession();
   const [isMounted, setIsMounted] = useState(false);
 
-  const handleEditorDidMount = (editor: MonacoEditor.IStandaloneCodeEditor, monaco: Monaco) => {
+  const handleEditorDidMount = (
+    editor: MonacoEditor.IStandaloneCodeEditor,
+    monaco: Monaco,
+  ) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     setIsMounted(true);
@@ -91,10 +102,8 @@ const PlaygroundEditor = ({
   };
 
   const registerPrettierFormatter = (monaco: Monaco) => {
-    if (formatterDisposableRef.current) {
-      formatterDisposableRef.current.dispose();
-      formatterDisposableRef.current = null;
-    }
+    // Singleton guard: only register once globally
+    if (formatterRegistered) return;
 
     const languages = ["javascript", "typescript", "html", "css", "json"];
 
@@ -157,122 +166,140 @@ const PlaygroundEditor = ({
       }),
     );
 
-    formatterDisposableRef.current = {
-      dispose: () => disposables.forEach((d) => d.dispose()),
-    };
+    formatterRegistered = true;
   };
 
   const registerInlineCompletionProvider = (monaco: Monaco) => {
-    // Dispose previous provider if exists
-    if (inlineProviderDisposableRef.current) {
-      inlineProviderDisposableRef.current.dispose();
-      inlineProviderDisposableRef.current = null;
-    }
+    // Singleton guard: only register once globally
+    if (inlineProviderRegistered) return;
 
-    inlineProviderDisposableRef.current =
-      monaco.languages.registerInlineCompletionsProvider(
-        { pattern: "**" },
-        {
-          provideInlineCompletions: async (model, position, context, token) => {
-            // Check if inline suggestions are enabled
-            if (!useAI.getState().inlineSuggestionsEnabled)
-              return { items: [] };
-            if (token.isCancellationRequested) return { items: [] };
+    monaco.languages.registerInlineCompletionsProvider(
+      { pattern: "**" },
+      {
+        provideInlineCompletions: async (model, position, _context, token) => {
+          // Check if inline suggestions are enabled
+          if (!useAI.getState().inlineSuggestionsEnabled) return { items: [] };
+          if (token.isCancellationRequested) return { items: [] };
 
-            // Gather context: lines around cursor
-            const lineCount = model.getLineCount();
-            const currentLine = model.getLineContent(position.lineNumber);
-            const textBeforeCursor = currentLine.substring(
-              0,
-              position.column - 1,
-            );
+          // Gather context: lines around cursor
+          const lineCount = model.getLineCount();
+          const currentLine = model.getLineContent(position.lineNumber);
+          const textBeforeCursor = currentLine.substring(
+            0,
+            position.column - 1,
+          );
 
-            // Don't trigger on empty lines or very short input
-            if (textBeforeCursor.trim().length < 3) return { items: [] };
+          // Don't trigger on empty lines or very short input
+          if (textBeforeCursor.trim().length < 3) return { items: [] };
 
-            // Build context from surrounding lines
-            const startLine = Math.max(1, position.lineNumber - 20);
-            const endLine = Math.min(lineCount, position.lineNumber + 5);
-            const contextLines: string[] = [];
-            for (let i = startLine; i <= endLine; i++) {
-              if (i === position.lineNumber) {
-                contextLines.push(textBeforeCursor + "█"); // cursor marker
-              } else {
-                contextLines.push(model.getLineContent(i));
-              }
+          // Build context from surrounding lines
+          const startLine = Math.max(1, position.lineNumber - 20);
+          const endLine = Math.min(lineCount, position.lineNumber + 5);
+          const contextLines: string[] = [];
+          for (let i = startLine; i <= endLine; i++) {
+            if (i === position.lineNumber) {
+              contextLines.push(textBeforeCursor + "█"); // cursor marker
+            } else {
+              contextLines.push(model.getLineContent(i));
+            }
+          }
+
+          const prompt = contextLines.join("\n");
+          const language = model.getLanguageId();
+
+          // Wait with debounce (return promise that resolves after delay)
+          await new Promise<void>((resolve) => {
+            const key = model.uri.toString();
+
+            const pending = inlineCompletionDebounce.get(key);
+
+            if (pending) {
+              clearTimeout(pending.timer);
+              pending.resolve();
             }
 
-            const prompt = contextLines.join("\n");
-            const language = model.getLanguageId();
+            const timer = setTimeout(() => {
+              inlineCompletionDebounce.delete(key);
+              resolve();
+            }, EDITOR_CONFIG.INLINE_SUGGESTION_DEBOUNCE_MS);
 
-            // Wait with debounce (return promise that resolves after delay)
-            await new Promise<void>((resolve) => {
-              if (debounceTimerRef.current)
-                clearTimeout(debounceTimerRef.current);
-              debounceTimerRef.current = setTimeout(
-                resolve,
-                EDITOR_CONFIG.INLINE_SUGGESTION_DEBOUNCE_MS,
-              );
+            inlineCompletionDebounce.set(key, {
+              timer,
+              resolve,
             });
 
-            if (token.isCancellationRequested) return { items: [] };
+            token.onCancellationRequested(() => {
+              const current = inlineCompletionDebounce.get(key);
 
-            try {
-              const { provider, getUserApiKey } = useAI.getState();
-              const userApiKey = getUserApiKey();
-
-              const res = await fetch("/api/completion", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  prompt,
-                  language,
-                  provider,
-                  userApiKey: userApiKey || undefined,
-                }),
-              });
-
-              if (!res.ok) return { items: [] };
-
-              const data = await res.json();
-              const completion = data.completion?.trim();
-
-              if (!completion) return { items: [] };
-
-              // Clean up completion - remove markdown code fences if present
-              let cleanCompletion = completion;
-              if (cleanCompletion.startsWith("```")) {
-                const lines = cleanCompletion.split("\n");
-                lines.shift(); // remove opening fence
-                if (lines[lines.length - 1]?.trim() === "```") lines.pop();
-                cleanCompletion = lines.join("\n");
+              if (current?.timer === timer) {
+                inlineCompletionDebounce.delete(key);
               }
 
-              return {
-                items: [
-                  {
-                    insertText: cleanCompletion,
-                    range: {
-                      startLineNumber: position.lineNumber,
-                      startColumn: position.column,
-                      endLineNumber: position.lineNumber,
-                      endColumn: position.column,
-                    },
-                  },
-                ],
-              };
-            } catch (error) {
-              console.warn("Inline completion error:", error);
-              return { items: [] };
-            }
-          },
+              clearTimeout(timer);
+              resolve();
+            });
+          });
 
-          freeInlineCompletions: () => {},
+          if (token.isCancellationRequested) return { items: [] };
+
+          try {
+            const { provider, getUserApiKey } = useAI.getState();
+            const userApiKey = getUserApiKey();
+
+            const res = await fetch("/api/completion", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                prompt,
+                language,
+                provider,
+                userApiKey: userApiKey || undefined,
+              }),
+            });
+
+            if (!res.ok) return { items: [] };
+
+            const data = await res.json();
+            const completion = data.completion?.trim();
+
+            if (!completion) return { items: [] };
+
+            // Clean up completion - remove markdown code fences if present
+            let cleanCompletion = completion;
+            if (cleanCompletion.startsWith("```")) {
+              const lines = cleanCompletion.split("\n");
+              lines.shift(); // remove opening fence
+              if (lines[lines.length - 1]?.trim() === "```") lines.pop();
+              cleanCompletion = lines.join("\n");
+            }
+
+            return {
+              items: [
+                {
+                  insertText: cleanCompletion,
+                  range: {
+                    startLineNumber: position.lineNumber,
+                    startColumn: position.column,
+                    endLineNumber: position.lineNumber,
+                    endColumn: position.column,
+                  },
+                },
+              ],
+            };
+          } catch (error) {
+            console.warn("Inline completion error:", error);
+            return { items: [] };
+          }
         },
-      );
+
+        freeInlineCompletions: () => {},
+      },
+    );
+
+    inlineProviderRegistered = true;
   };
 
-  const updateEditorLanguage = () => {
+  const updateEditorLanguage = useCallback(() => {
     if (!activeFile || !monacoRef.current || !editorRef.current) return;
     const model = editorRef.current.getModel();
     if (!model) return;
@@ -283,12 +310,11 @@ const PlaygroundEditor = ({
     } catch (error) {
       console.warn("Failed to set editor language:", error);
     }
-  };
+  }, [activeFile]);
 
   useEffect(() => {
     updateEditorLanguage();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeFile]);
+  }, [updateEditorLanguage]);
 
   // Bind Yjs to Monaco
   useEffect(() => {
@@ -363,7 +389,9 @@ const PlaygroundEditor = ({
           }
 
           const states = Array.from(
-            provider.awareness.getStates().entries() as Iterable<[number, { user?: { color?: string; name?: string } }]>,
+            provider.awareness.getStates().entries() as Iterable<
+              [number, { user?: { color?: string; name?: string } }]
+            >,
           );
           let css = "";
 
@@ -431,22 +459,17 @@ const PlaygroundEditor = ({
     };
   }, [activeFile, playgroundId, isMounted, content, session]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount - only binding cleanup, providers are global singletons
   useEffect(() => {
     return () => {
-      if (inlineProviderDisposableRef.current) {
-        inlineProviderDisposableRef.current.dispose();
-        inlineProviderDisposableRef.current = null;
-      }
-
-      if (formatterDisposableRef.current) {
-        formatterDisposableRef.current.dispose();
-        formatterDisposableRef.current = null;
-      }
+      // Provider disposals removed - they are global singletons that should persist
+      // Only clean up the binding for this editor instance
       if (bindingRef.current) {
         bindingRef.current.destroy();
         bindingRef.current = null;
       }
+ feat/split-view-editor
+
       if (playgroundId) {
         destroyYDoc(playgroundId);
       }
@@ -457,8 +480,9 @@ const PlaygroundEditor = ({
           model.dispose();
         });
       }
+ develop
     };
-  }, [playgroundId]);
+  }, []);
 
   const { editorTheme, fontLigatures } = usePreferences();
 
@@ -509,8 +533,11 @@ const PlaygroundEditor = ({
   return (
     <div className="h-full relative">
       <Editor
+
+        height="100%"
         height={"100%"}
         path={(activeFile as any)?.id || activeFile?.filename || "default"}
+
         defaultValue={content}
         onChange={(value) => onContentChange(value || "")}
         onMount={handleEditorDidMount}
@@ -523,6 +550,7 @@ const PlaygroundEditor = ({
           ...defaultEditorOptions,
           fontLigatures: fontLigatures,
           inlineSuggest: { enabled: true },
+          automaticLayout: true,
         }}
       />
     </div>

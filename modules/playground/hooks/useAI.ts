@@ -106,12 +106,13 @@ export const useAI = create<AIState>((set, get) => {
                 localStorage.setItem(storageKeys[provider], key);
             } catch { }
 
-            const stateUpdates: Record<AIProvider, Partial<AIState>> = {
-                gemini: { userGeminiKey: key },
-                groq: { userGroqKey: key },
-                mistral: { userMistralKey: key },
+            const stateKeys: Record<AIProvider, keyof Pick<AIState, 'userGeminiKey' | 'userGroqKey' | 'userMistralKey'>> = {
+                gemini: "userGeminiKey",
+                groq: "userGroqKey",
+                mistral: "userMistralKey",
             };
-            set(stateUpdates[provider]);
+            const partialState: Partial<AIState> = { [stateKeys[provider]]: key };
+            set(partialState);
         },
 
         getUserApiKey: (provider?: AIProvider) => {
