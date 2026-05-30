@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
             id: playground.id,
             title: playground.title,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error("ZIP upload error:", error);
 
         if (error instanceof ValidationError) {
@@ -196,8 +196,10 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        const errorMessage = error instanceof Error ? error.message : "Failed to process ZIP file";
+
         return NextResponse.json(
-            { error: error.message || "Failed to process ZIP file" },
+            { error: errorMessage },
             { status: 500 }
         );
     }
