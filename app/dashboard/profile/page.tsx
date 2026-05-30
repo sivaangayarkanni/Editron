@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import type { Project } from "@/modules/dashboard/types";
 import { currentUser } from "@/modules/auth/actions";
 import { getUserProfileStats } from "@/modules/profile/actions";
 import KPIStats from "@/modules/profile/components/KPIStats";

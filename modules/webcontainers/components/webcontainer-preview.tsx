@@ -18,6 +18,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import type { TerminalRef } from "./terminal";
 // import { Input } from "@/components/ui/input";
+import RuntimeActivityPanel from "./runtime-activity-panel";
 
 const TerminalComponent = dynamic(() => import("./terminal"), { ssr: false });
 
@@ -48,7 +49,7 @@ export const getScriptFromPkg = (pkgJson: string | null): string | null => {
 interface WebContainerPreviewProps {
   templateData: TemplateFolder;
   serverUrl: string;
-  
+
   error: string | null;
   instance: WebContainer | null;
   writeFileSync: (path: string, content: string) => Promise<void>;
@@ -58,12 +59,15 @@ const WebContainerPreview = ({
   templateData,
   error,
   instance,
- 
+
   serverUrl,
-  writeFileSync : _writeFileSync,
+  writeFileSync: _writeFileSync,
   forceResetup = false,
 }: WebContainerPreviewProps) => {
   const [previewUrl, setPreviewUrl] = useState<string>(serverUrl || "");
+  const addRuntimeEvent = useWebContainerStore(
+    (state) => state.addRuntimeEvent,
+  );
 
   useEffect(() => {
     if (serverUrl) {
@@ -110,7 +114,10 @@ const WebContainerPreview = ({
   };
 
   /** Register a server-ready listener, unsubscribing any prior one to prevent accumulation. */
-  const bindServerReady = (inst: WebContainer, handler: (port: number, url: string) => void) => {
+  const bindServerReady = (
+    inst: WebContainer,
+    handler: (port: number, url: string) => void,
+  ) => {
     serverReadyCleanupRef.current?.();
     serverReadyCleanupRef.current = inst.on("server-ready", handler);
   };
@@ -138,8 +145,6 @@ const WebContainerPreview = ({
       write(data: string) {
         if (terminalRef.current) {
           writeTerminal(data);
-        } else {
-          console.log("[WebContainer Install] ", data.trim());
         }
 
         const now = Date.now();
@@ -365,11 +370,17 @@ const WebContainerPreview = ({
             writeTerminal(
               "🔄 Reconnecting to existing WebContainer session...\r\n",
             );
+            addRuntimeEvent({
+              type: "info",
+              message: "Reconnecting to existing WebContainer session",
+            });
 
             bindServerReady(instance, (port: number, url: string) => {
-              writeTerminal(
-                `🌐 Server ready at ${url} (port ${port})\r\n`,
-              );
+              writeTerminal(`🌐 Server ready at ${url} (port ${port})\r\n`);
+              addRuntimeEvent({
+                type: "success",
+                message: `Server ready on port ${port}`,
+              });
 
               const isCommonFrontendPort = [
                 3000, 5173, 8080, 4200, 8000,
@@ -415,6 +426,10 @@ const WebContainerPreview = ({
             writeTerminal(
               `📦 Reinstalling dependencies using \x1b[33m${pkgManager}\x1b[0m (${reconnectTotalDeps} packages)...\r\n`,
             );
+            addRuntimeEvent({
+              type: "info",
+              message: `Reinstalling dependencies using ${pkgManager}`,
+            });
 
             const installArgs =
               pkgManager === "npm"
@@ -432,8 +447,16 @@ const WebContainerPreview = ({
               writeTerminal(
                 `⚠️ ${pkgManager} install exited with code ${reinstallExitCode}, attempting to start anyway...\r\n`,
               );
+              addRuntimeEvent({
+                type: "error",
+                message: `${pkgManager} install exited with code ${reinstallExitCode}`,
+              });
             } else {
               writeTerminal("✅ Dependencies ready\r\n");
+              addRuntimeEvent({
+                type: "success",
+                message: "Dependencies ready",
+              });
             }
 
             setLoadingState((prev) => ({
@@ -453,6 +476,10 @@ const WebContainerPreview = ({
             writeTerminal(
               `🚀 Restarting development server via \x1b[32m${startCommand.cmd} ${startCommand.args.join(" ")}\x1b[0m...\r\n`,
             );
+            addRuntimeEvent({
+              type: "info",
+              message: `Restarting development server via ${startCommand.cmd} ${startCommand.args.join(" ")}`,
+            });
             const startProcess = await instance.spawn(
               startCommand.cmd,
               startCommand.args,
@@ -473,6 +500,10 @@ const WebContainerPreview = ({
         setCurrentStep(1);
         // Write to terminal
         writeTerminal("🔄 Transforming template data...\r\n");
+        addRuntimeEvent({
+          type: "info",
+          message: "Transforming template data",
+        });
 
         const files = transformToWebContainerFormat(templateData);
         setLoadingState((prev) => ({
@@ -485,9 +516,17 @@ const WebContainerPreview = ({
         //  Step-2 Mount Files
 
         writeTerminal("📁 Mounting files to WebContainer...\r\n");
+        addRuntimeEvent({
+          type: "info",
+          message: "Mounting files to WebContainer",
+        });
         await instance.mount(files);
 
         writeTerminal("✅ Files mounted successfully\r\n");
+        addRuntimeEvent({
+          type: "success",
+          message: "Files mounted successfully",
+        });
 
         // Check if package.json exists, if not create a default one for static serving
         try {
@@ -645,6 +684,10 @@ const WebContainerPreview = ({
         writeTerminal(
           `📦 Installing dependencies using \x1b[33m${pkgManager}\x1b[0m (${totalDeps} packages)...\r\n`,
         );
+        addRuntimeEvent({
+          type: "info",
+          message: `Installing dependencies using ${pkgManager}`,
+        });
 
         // Prefer npm ci (reads lockfile, skips registry metadata = no JSON truncation in WebContainer)
         // Fall back to npm install if no lockfile is present
@@ -682,9 +725,17 @@ const WebContainerPreview = ({
           writeTerminal(
             `⚠️ Dependencies install exited with code ${installExitCode}, attempting to start anyway...\r\n`,
           );
+          addRuntimeEvent({
+            type: "error",
+            message: `Dependencies install exited with code ${installExitCode}`,
+          });
           console.warn(`npm install exited with code ${installExitCode}`);
         } else {
           writeTerminal("✅ Dependencies installed successfully\r\n");
+          addRuntimeEvent({
+            type: "success",
+            message: "Dependencies installed successfully",
+          });
         }
 
         setLoadingState((prev) => ({
@@ -705,6 +756,10 @@ const WebContainerPreview = ({
         writeTerminal(
           `🚀 Starting development server via \x1b[32m${startCommand.cmd} ${startCommand.args.join(" ")}\x1b[0m...\r\n`,
         );
+        addRuntimeEvent({
+          type: "info",
+          message: `Starting development server via ${startCommand.cmd} ${startCommand.args.join(" ")}`,
+        });
 
         const startProcess = await instance.spawn(
           startCommand.cmd,
@@ -715,6 +770,10 @@ const WebContainerPreview = ({
           // Surface the active preview URL in the embedded terminal so users can
           // diagnose which WebContainer server was selected when multiple ports start.
           writeTerminal(`🌐 Server ready at ${url} (port ${port})\r\n`);
+          addRuntimeEvent({
+            type: "success",
+            message: `Server ready on port ${port}`,
+          });
 
           // Heuristic: Prefer port 5173 (Vite) or 3000 (Create React App / Next.js) over others (often backend)
           // valid ports for frontend usually: 3000, 3001, 3002, 5173, 5174, 8080, 4200 (Angular), 8000 (Gatsby)
@@ -752,6 +811,10 @@ const WebContainerPreview = ({
         console.error("Error setting up container:", err);
         const errorMessage = err instanceof Error ? err.message : String(err);
         writeTerminal(`❌ Error: ${errorMessage}\r\n`);
+        addRuntimeEvent({
+          type: "error",
+          message: errorMessage,
+        });
         setSetupError(errorMessage);
         setIsSetupInProgress(false);
         setupInProgressRef.current = false;
@@ -775,8 +838,6 @@ const WebContainerPreview = ({
       useWebContainerStore.getState().setServerUrl(null);
     };
   }, []);
-
- 
 
   if (error || setupError) {
     return (
@@ -906,12 +967,21 @@ const WebContainerPreview = ({
                   }}
                   title="Refresh preview"
                 >
+ feat/split-view-editor
+                  <RefreshCw
+                    size={13}
+                    className={
+                      !isSetupComplete ? "animate-spin text-primary" : ""
+                    }
+                  />
+
                     <RefreshCw
                       size={13}
                       className={
-                        !isSetupComplete ? "animate-spin text-primary" : ""
+                        isLoading ? "animate-spin text-primary" : ""
                       }
                     />
+ develop
                 </Button>
               </div>
             </div>
@@ -997,6 +1067,8 @@ const WebContainerPreview = ({
               />
             </div>
           </div>
+
+          <RuntimeActivityPanel />
 
           {/* Terminal Section */}
           <div className="h-[30vh] min-h-[150px] max-h-[80vh] border-t border-border/40 shrink-0 relative bg-background">
