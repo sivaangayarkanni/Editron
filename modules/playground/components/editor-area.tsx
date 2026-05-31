@@ -44,16 +44,13 @@ const generateFileId = (file: TemplateFile, root: TemplateFolder): string => {
           item.items,
           `${currentPath}/${item.folderName}`,
         );
-
         if (result) return result;
       } else if (item === file) {
         return `${currentPath}/${item.filename}.${item.fileExtension}`;
       }
     }
-
     return null;
   };
-
   return findPath(root.items) || crypto.randomUUID();
 };
 
@@ -85,20 +82,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     setActiveFileId: globalSetActiveFileId,
     closeFile: globalCloseFile,
     openFile,
-feat/split-view-editor
     updateFileContent: globalUpdateFileContent,
-    
-    updateFileContent,
-    
-    // Split View State
-    splitLayout,
-    setSplitLayout,
-    focusedPane,
-    setFocusedPane,
-    primaryPaneFiles,
-    secondaryPaneFiles,
-    secondaryActiveFileId,
-develop
   } = useFileExplorer();
 
   const {
@@ -120,11 +104,10 @@ develop
 
   const { openChat } = useAI();
 
-  const activeFile = openFiles.find((file) => file.id === activeFileId);
-  const secondaryActiveFile = openFiles.find((file) => file.id === secondaryActiveFileId);
+  const activeFile = openFiles.find((file) => file.id === activePaneId);
   const collaboratorCount = useCollaboratorCount(id);
 
-  // Handle time travel to a specific commit
+  // Handle time travel
   const handleTravelBack = async (commitId: string) => {
     const commit = commits.find((c) => c.id === commitId);
     if (!commit) return;
@@ -135,28 +118,6 @@ develop
 
       if (success) {
         toast.success(`Traveled to: ${commit.message}`, { id: "time-travel" });
-        
-        // Reload all open files to reflect the checked-out state
-        if (instance && writeFileSync) {
-          for (const file of openFiles) {
-            try {
-              const filePath = `${file.filename}.${file.fileExtension}`;
-              const readProcess = await instance.spawn("cat", [filePath]);
-              let content = "";
-              readProcess.output.pipeTo(
-                new WritableStream({
-                  write(data) {
-                    content += data;
-                  },
-                })
-              );
-              await readProcess.exit;
-              updateFileContent(file.id, content);
-            } catch (err) {
-              console.error(`Failed to reload file ${file.filename}:`, err);
-            }
-          }
-        }
       } else {
         toast.error("Failed to travel back", { id: "time-travel" });
       }
@@ -166,28 +127,22 @@ develop
     }
   };
 
-  // Handle AI explanation of a commit
   const handleExplainWithAI = (commitId: string) => {
     const commit = commits.find((c) => c.id === commitId);
     if (!commit) return;
 
-    // Open AI chat with a pre-filled prompt
     openChat();
-    
-    // Use a timeout to ensure the chat is open before sending the message
     setTimeout(() => {
       const aiState = useAI.getState();
       aiState.addMessage({
         role: "user",
-        content: `Explain this git commit:\n\nCommit: ${commit.hash}\nAuthor: ${commit.author}\nDate: ${commit.date.toLocaleString()}\nMessage: ${commit.message}\n\nPlease analyze what changes were likely made in this commit and why they might be important.`,
+        content: `Explain this git commit:\n\nCommit: ${commit.hash}\nAuthor: ${commit.author}\nDate: ${commit.date.toLocaleString()}\nMessage: ${commit.message}`,
       });
     }, 100);
   };
-  // Sync Yjs remote changes directly to WebContainer for live preview
-  useYjsWebContainerSync(id, templateData, writeFileSync);
-  const collaboratorCount = useCollaboratorCount(id);
 
-  // Pane-aware wrapper functions with immutable updates
+  useYjsWebContainerSync(id, templateData, writeFileSync);
+
   const setActiveFileIdForPane = (paneId: string, fileId: string) => {
     globalSetActiveFileId(fileId);
     setEditorPanes((prev) =>
@@ -199,39 +154,14 @@ develop
 
   const closeFileForPane = (paneId: string, fileId: string) => {
     setEditorPanes((prev) => {
-      const primaryPaneId = prev[0]?.id;
-
-      // Closing secondary split pane
-      if (paneId !== primaryPaneId) {
-        const remainingPanes = prev.filter((pane) => pane.id !== paneId);
-
-        // Always reset active pane to primary
-        setActivePaneId(primaryPaneId);
-
-        // Ensure primary pane remains focused
-        if (remainingPanes[0]?.activeFileId) {
-          globalSetActiveFileId(remainingPanes[0].activeFileId);
-        }
-
-        return remainingPanes;
-      }
-
-      // Closing main pane file
       const updated = prev.map((pane) =>
         pane.id === paneId && pane.activeFileId === fileId
           ? { ...pane, activeFileId: null }
           : pane,
       );
-
-      // Only globally close file if NO panes still use it
-      const stillUsed = updated.some((pane) => pane.activeFileId === fileId);
-
-      if (!stillUsed) {
-        globalCloseFile(fileId);
-      }
-
       return updated;
     });
+    globalCloseFile(fileId);
   };
 
   const updateFileContentForPane = (
@@ -242,63 +172,6 @@ develop
     globalUpdateFileContent(fileId, value);
   };
 
-  // Auto-open default file when preview is shown if no file is open
-  useEffect(() => {
-    if (
-      isPreviewVisible &&
-      editorPanes.every((pane) => !pane.activeFileId) &&
-      templateData
-    ) {
-      const findDefaultFile = (
-        items: (TemplateFile | TemplateFolder)[],
-      ): TemplateFile | null => {
-        for (const item of items) {
-          if (!("folderName" in item)) {
-            if (
-              [
-                "App.tsx",
-                "App.jsx",
-                "index.tsx",
-                "index.jsx",
-                "index.js",
-                "main.tsx",
-                "main.js",
-                "index.html",
-              ].includes(`${item.filename}.${item.fileExtension}`)
-            ) {
-              return item;
-            }
-          } else {
-            const found = findDefaultFile(item.items);
-            if (found) return found;
-          }
-        }
-        return null;
-      };
-
-      const defaultFile = findDefaultFile(templateData.items);
-      if (defaultFile && editorPanes[0]) {
-        const defaultFileId = generateFileId(defaultFile, templateData);
-        openFile(defaultFile);
-        globalSetActiveFileId(defaultFileId);
-        setEditorPanes((prev) =>
-          prev.map((pane, idx) =>
-            idx === 0 ? { ...pane, activeFileId: defaultFileId } : pane,
-          ),
-        );
-        setActivePaneId(editorPanes[0].id);
-      }
-    }
-  }, [
-    isPreviewVisible,
-    editorPanes,
-    templateData,
-    openFile,
-    globalSetActiveFileId,
-    setActivePaneId,
-    setEditorPanes,
-  ]);
-
   const containerStatus: "idle" | "building" | "running" | "error" =
     containerError
       ? "error"
@@ -308,192 +181,135 @@ develop
           ? "running"
           : "idle";
 
-  const primaryTabs = openFiles.filter(f => primaryPaneFiles.includes(f.id));
-  const secondaryTabs = openFiles.filter(f => secondaryPaneFiles.includes(f.id));
-
-  const toggleSplitLayout = () => {
-    setSplitLayout(splitLayout === 'none' ? 'horizontal' : splitLayout === 'horizontal' ? 'vertical' : 'none');
-  };
-
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)]">
       <div className="flex-1 min-h-0">
         {openFiles.length > 0 ? (
           <div className="h-full flex flex-col">
-            {/* Editor + Preview */}
             <div className="flex-1 min-h-0" role="tabpanel">
-              <ResizablePanelGroup
-                direction="horizontal"
-                className="h-full"
-              >
-                <ResizablePanel
-                  defaultSize={isPreviewVisible ? 50 : isTimeTravelOpen ? 75 : 100}
-                >
-                  <ErrorBoundary
-                    name="MonacoEditor"
-                    fallback={({ reset }) => (
-                      <div className="flex h-full min-h-[200px] items-center justify-center p-6">
-                        <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
-                          <h3 className="mb-2 text-lg font-semibold text-destructive">
-                            Editor crashed
-                          </h3>
-                          <p className="mb-4 text-sm text-muted-foreground">
-                            The editor failed, but the rest of the
-                            playground is still available.
-                          </p>
-                          <Button onClick={reset}>Reload Editor</Button>
-                        </div>
+              {/* ==================== CORRECT LAYOUT ==================== */}
               <ResizablePanelGroup direction="horizontal" className="h-full">
-                {/* Editors Area */}
-                <ResizablePanel defaultSize={isPreviewVisible ? 50 : 100} className="flex flex-col h-full bg-background min-w-0">
-                  <ResizablePanelGroup direction={splitLayout === 'vertical' ? 'vertical' : 'horizontal'} className="h-full">
-                    
-                    {/* Primary Pane */}
-                    <ResizablePanel defaultSize={splitLayout !== 'none' ? 50 : 100} className="flex flex-col h-full min-w-[200px] min-h-[100px]">
-                      <PlaygroundTabBar
-                        openFiles={primaryTabs}
-                        activeFileId={activeFileId}
-                        setActiveFileId={(id) => setActiveFileId(id, 'primary')}
-                        closeFile={(id) => closeFile(id, 'primary')}
-                        onSplit={toggleSplitLayout}
-                        splitLayout={splitLayout}
-                        isFocused={focusedPane === 'primary'}
-                        onFocus={() => setFocusedPane('primary')}
-                      />
-                      <Breadcrumbs activeFile={activeFile} templateData={templateData} />
-                      <div className="flex-1 min-h-0 relative" onClickCapture={() => setFocusedPane('primary')}>
-                        {activeFileId && primaryTabs.length > 0 ? (
-                direction={splitDirection}
-                className="h-full"
-              >
-                {editorPanes.map((pane, index) => (
-                  <React.Fragment key={pane.id}>
-                    <ResizablePanel defaultSize={100 / editorPanes.length}>
-                      <div className="h-full flex flex-col">
-                        {/* Tab bar for this pane */}
-                        <PlaygroundTabBar
-                          paneId={pane.id}
-                          openFiles={openFiles}
-                          activeFileId={pane.activeFileId || null}
-                          setActiveFileId={setActiveFileIdForPane}
-                          closeFile={closeFileForPane}
-                        />
-
-                        {/* Breadcrumbs for this pane */}
-                        <Breadcrumbs
-                          activeFile={openFiles.find(
-                            (f) => f.id === pane.activeFileId,
-                          )}
-                          templateData={templateData}
-                        />
-
-                        {/* Editor for this pane */}
-                        <div className="flex-1 min-h-0 h-full overflow-hidden">
-                          <ErrorBoundary
-                            name="MonacoEditor"
-                            fallback={({ reset }) => (
-                              <div className="flex h-full min-h-[200px] items-center justify-center p-6">
-                                <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
-                                  <h3 className="mb-2 text-lg font-semibold text-destructive">
-                                    Editor crashed
-                                  </h3>
-                                  <p className="mb-4 text-sm text-muted-foreground">
-                                    The editor failed, but the rest of the
-                                    playground is still available.
-                                  </p>
-                                  <Button onClick={reset}>Reload Editor</Button>
-                                </div>
-                              </div>
-                            )}
-                          >
-                            <div
-                              className="flex-1 min-h-0 h-full overflow-hidden"
-                              onClick={() => setActivePaneId(pane.id)}
-                            >
-                              <PlaygroundEditor
-                                activeFile={openFiles.find(
-                                  (f) => f.id === pane.activeFileId,
+                
+                {/* LEFT: Editors */}
+                <ResizablePanel defaultSize={60} minSize={40}>
+                  <ResizablePanelGroup direction={splitDirection} className="h-full">
+                    {editorPanes.map((pane, index) => (
+                      <React.Fragment key={pane.id}>
+                        <ResizablePanel defaultSize={100 / editorPanes.length}>
+                          <div className="h-full flex flex-col">
+                            <PlaygroundTabBar
+                              paneId={pane.id}
+                              openFiles={openFiles}
+                              activeFileId={pane.activeFileId || null}
+                              setActiveFileId={setActiveFileIdForPane}
+                              closeFile={closeFileForPane}
+                            />
+                            <Breadcrumbs
+                              activeFile={openFiles.find(
+                                (f) => f.id === pane.activeFileId,
+                              )}
+                              templateData={templateData}
+                            />
+                            <div className="flex-1 min-h-0 h-full overflow-hidden">
+                              <ErrorBoundary
+                                name="MonacoEditor"
+                                fallback={({ reset }) => (
+                                  <div className="flex h-full min-h-[200px] items-center justify-center p-6">
+                                    <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
+                                      <h3 className="mb-2 text-lg font-semibold text-destructive">
+                                        Editor crashed
+                                      </h3>
+                                      <p className="mb-4 text-sm text-muted-foreground">
+                                        The editor failed, but the rest of the
+                                        playground is still available.
+                                      </p>
+                                      <Button onClick={reset}>Reload Editor</Button>
+                                    </div>
+                                  </div>
                                 )}
-                                content={
-                                  openFiles.find(
-                                    (f) => f.id === pane.activeFileId,
-                                  )?.content || ""
-                                }
-                                onContentChange={(value) =>
-                                  pane.activeFileId &&
-                                  updateFileContentForPane(
-                                    pane.id,
-                                    pane.activeFileId,
-                                    value,
-                                  )
-                                }
-                                onCursorChange={(line, col) =>
-                                  setCursorPosition({ line, col })
-                                }
-                              />
+                              >
+                                <div
+                                  className="h-full"
+                                  onClick={() => setActivePaneId(pane.id)}
+                                >
+                                  <PlaygroundEditor
+                                    activeFile={openFiles.find(
+                                      (f) => f.id === pane.activeFileId,
+                                    )}
+                                    content={
+                                      openFiles.find(
+                                        (f) => f.id === pane.activeFileId,
+                                      )?.content || ""
+                                    }
+                                    onContentChange={(value) =>
+                                      pane.activeFileId &&
+                                      updateFileContentForPane(
+                                        pane.id,
+                                        pane.activeFileId,
+                                        value,
+                                      )
+                                    }
+                                    onCursorChange={(line, col) =>
+                                      setCursorPosition({ line, col })
+                                    }
+                                  />
+                                </div>
+                              </ErrorBoundary>
                             </div>
-                          </ErrorBoundary>
-                        </div>
-                      </div>
-                    </ResizablePanel>
-                    {index < editorPanes.length - 1 && <ResizableHandle />}
-                  </React.Fragment>
-                ))}
-                {isPreviewVisible && (
-                  <>
-                    <ResizableHandle />
-                    <ResizablePanel defaultSize={30}>
-                      {templateData ? (
-                        <WebContainerPreview
-                          templateData={templateData}
-                          instance={instance}
-                          writeFileSync={writeFileSync || (async () => {})}
-                          error={containerError}
-                          serverUrl={serverUrl || ""}
-                          forceResetup={false}
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center p-6 bg-muted/10">
-                          {containerError ? (
-                            <p className="text-destructive text-sm font-medium">
-                              Failed to load preview container.
-                            </p>
+                          </div>
+                        </ResizablePanel>
+                        {index < editorPanes.length - 1 && <ResizableHandle />}
+                      </React.Fragment>
+                    ))}
+                  </ResizablePanelGroup>
+                </ResizablePanel>
+
+                {/* RIGHT: Preview + Time Travel */}
+                {(isPreviewVisible || isTimeTravelOpen) && (
+                  <ResizablePanel defaultSize={40} minSize={25}>
+                    <div className="flex flex-col h-full">
+                      {isPreviewVisible && (
+                        <div className="flex-1 min-h-0">
+                          {templateData ? (
+                            <WebContainerPreview
+                              templateData={templateData}
+                              instance={instance}
+                              writeFileSync={writeFileSync || (async () => {})}
+                              error={containerError}
+                              serverUrl={serverUrl || ""}
+                              forceResetup={false}
+                            />
                           ) : (
-                            <p className="text-muted-foreground text-sm">
-                              Loading preview environment...
-                            </p>
+                            <div className="flex h-full items-center justify-center p-6 bg-muted/10">
+                              <p className="text-muted-foreground text-sm">
+                                Loading preview environment...
+                              </p>
+                            </div>
                           )}
                         </div>
                       )}
-                    </ResizablePanel>
-                  </>
-                )}
-                {isTimeTravelOpen && (
-                  <>
-                    {!isPreviewVisible && <ResizableHandle />}
-                    <ResizablePanel 
-                      defaultSize={25}
-                      minSize={20}
-                      maxSize={40}
-                      className={`transition-all duration-300 ${isTimeTravelOpen ? "animate-slideInRight" : ""}`}
-                    >
-                      <CodeTimeTravel
-                        commits={commits.map((c) => ({
-                          id: c.id,
-                          message: c.message,
-                          date: c.date,
-                          author: c.author,
-                          hash: c.hash,
-                        }))}
-                        onTravelBack={handleTravelBack}
-                        onExplainWithAI={handleExplainWithAI}
-                        isLoading={gitLoading}
-                        activeCommitId={
-                          commits.find((c) => c.hash === currentCommitHash)?.id
-                        }
-                      />
-                    </ResizablePanel>
-                  </>
+
+                      {isTimeTravelOpen && (
+                        <div className="flex-1 min-h-0 border-t">
+                          <CodeTimeTravel
+                            commits={commits.map((c) => ({
+                              id: c.id,
+                              message: c.message,
+                              date: c.date,
+                              author: c.author,
+                              hash: c.hash,
+                            }))}
+                            onTravelBack={handleTravelBack}
+                            onExplainWithAI={handleExplainWithAI}
+                            isLoading={gitLoading}
+                            activeCommitId={
+                              commits.find((c) => c.hash === currentCommitHash)?.id
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </ResizablePanel>
                 )}
               </ResizablePanelGroup>
             </div>
@@ -510,11 +326,7 @@ develop
       </div>
 
       <StatusBar
-        activeFile={openFiles.find(
-          (f) =>
-            f.id ===
-            editorPanes.find((p) => p.id === activePaneId)?.activeFileId,
-        )}
+        activeFile={activeFile}
         cursorPosition={cursorPosition}
         containerStatus={containerStatus}
         collaboratorCount={collaboratorCount}
