@@ -57,8 +57,6 @@ export function getOrCreateYDoc(roomId: string, token: string) {
 
     yDocs.set(roomId, { doc, provider });
 
-
-
     return { doc, provider };
 }
 

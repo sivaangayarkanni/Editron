@@ -30,8 +30,32 @@ import { useYjsWebContainerSync } from "@/modules/playground/hooks/useYjsWebCont
 
 const PlaygroundEditor = dynamic(
   () => import("@/modules/playground/components/playground-editor"),
-  { ssr: false }
+  { ssr: false },
 );
+
+const generateFileId = (file: TemplateFile, root: TemplateFolder): string => {
+  const findPath = (
+    items: (TemplateFile | TemplateFolder)[],
+    currentPath = "",
+  ): string | null => {
+    for (const item of items) {
+      if ("folderName" in item) {
+        const result = findPath(
+          item.items,
+          `${currentPath}/${item.folderName}`,
+        );
+
+        if (result) return result;
+      } else if (item === file) {
+        return `${currentPath}/${item.filename}.${item.fileExtension}`;
+      }
+    }
+
+    return null;
+  };
+
+  return findPath(root.items) || crypto.randomUUID();
+};
 
 interface EditorAreaProps {
   handleDownloadZip: () => void;
@@ -49,14 +73,21 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     serverUrl,
     containerLoading,
     containerError,
+    editorPanes,
+    splitDirection,
+    activePaneId,
+    setActivePaneId,
+    setEditorPanes,
   } = usePlaygroundContext();
 
   const {
     openFiles,
-    activeFileId,
-    setActiveFileId,
-    closeFile,
+    setActiveFileId: globalSetActiveFileId,
+    closeFile: globalCloseFile,
     openFile,
+feat/split-view-editor
+    updateFileContent: globalUpdateFileContent,
+    
     updateFileContent,
     
     // Split View State
@@ -67,6 +98,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
     primaryPaneFiles,
     secondaryPaneFiles,
     secondaryActiveFileId,
+develop
   } = useFileExplorer();
 
   const {
@@ -153,12 +185,72 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
   };
   // Sync Yjs remote changes directly to WebContainer for live preview
   useYjsWebContainerSync(id, templateData, writeFileSync);
+  const collaboratorCount = useCollaboratorCount(id);
+
+  // Pane-aware wrapper functions with immutable updates
+  const setActiveFileIdForPane = (paneId: string, fileId: string) => {
+    globalSetActiveFileId(fileId);
+    setEditorPanes((prev) =>
+      prev.map((pane) =>
+        pane.id === paneId ? { ...pane, activeFileId: fileId } : pane,
+      ),
+    );
+  };
+
+  const closeFileForPane = (paneId: string, fileId: string) => {
+    setEditorPanes((prev) => {
+      const primaryPaneId = prev[0]?.id;
+
+      // Closing secondary split pane
+      if (paneId !== primaryPaneId) {
+        const remainingPanes = prev.filter((pane) => pane.id !== paneId);
+
+        // Always reset active pane to primary
+        setActivePaneId(primaryPaneId);
+
+        // Ensure primary pane remains focused
+        if (remainingPanes[0]?.activeFileId) {
+          globalSetActiveFileId(remainingPanes[0].activeFileId);
+        }
+
+        return remainingPanes;
+      }
+
+      // Closing main pane file
+      const updated = prev.map((pane) =>
+        pane.id === paneId && pane.activeFileId === fileId
+          ? { ...pane, activeFileId: null }
+          : pane,
+      );
+
+      // Only globally close file if NO panes still use it
+      const stillUsed = updated.some((pane) => pane.activeFileId === fileId);
+
+      if (!stillUsed) {
+        globalCloseFile(fileId);
+      }
+
+      return updated;
+    });
+  };
+
+  const updateFileContentForPane = (
+    _paneId: string,
+    fileId: string,
+    value: string,
+  ) => {
+    globalUpdateFileContent(fileId, value);
+  };
 
   // Auto-open default file when preview is shown if no file is open
   useEffect(() => {
-    if (isPreviewVisible && !activeFileId && templateData) {
+    if (
+      isPreviewVisible &&
+      editorPanes.every((pane) => !pane.activeFileId) &&
+      templateData
+    ) {
       const findDefaultFile = (
-        items: (TemplateFile | TemplateFolder)[]
+        items: (TemplateFile | TemplateFolder)[],
       ): TemplateFile | null => {
         for (const item of items) {
           if (!("folderName" in item)) {
@@ -185,11 +277,27 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       };
 
       const defaultFile = findDefaultFile(templateData.items);
-      if (defaultFile) {
+      if (defaultFile && editorPanes[0]) {
+        const defaultFileId = generateFileId(defaultFile, templateData);
         openFile(defaultFile);
+        globalSetActiveFileId(defaultFileId);
+        setEditorPanes((prev) =>
+          prev.map((pane, idx) =>
+            idx === 0 ? { ...pane, activeFileId: defaultFileId } : pane,
+          ),
+        );
+        setActivePaneId(editorPanes[0].id);
       }
     }
-  }, [isPreviewVisible, activeFileId, templateData, openFile]);
+  }, [
+    isPreviewVisible,
+    editorPanes,
+    templateData,
+    openFile,
+    globalSetActiveFileId,
+    setActivePaneId,
+    setEditorPanes,
+  ]);
 
   const containerStatus: "idle" | "building" | "running" | "error" =
     containerError
@@ -212,6 +320,7 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       <div className="flex-1 min-h-0">
         {openFiles.length > 0 ? (
           <div className="h-full flex flex-col">
+            {/* Editor + Preview */}
             <div className="flex-1 min-h-0" role="tabpanel">
               <ResizablePanelGroup
                 direction="horizontal"
@@ -254,75 +363,86 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                       <Breadcrumbs activeFile={activeFile} templateData={templateData} />
                       <div className="flex-1 min-h-0 relative" onClickCapture={() => setFocusedPane('primary')}>
                         {activeFileId && primaryTabs.length > 0 ? (
-                          <ErrorBoundary
-                            name="MonacoEditor-Primary"
-                            fallback={({ reset }) => (
-                              <div className="flex h-full items-center justify-center p-6"><Button onClick={reset}>Reload Editor</Button></div>
-                            )}
-                          >
-                            <PlaygroundEditor
-                              activeFile={activeFile}
-                              content={activeFile?.content || ""}
-                              onContentChange={(value) => activeFileId && updateFileContent(activeFileId, value)}
-                              onCursorChange={(line, col) => setCursorPosition({ line, col })}
-                            />
-                          </ErrorBoundary>
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-muted-foreground/50 text-sm">
-                            <span className="font-mono">Open a file in Primary Pane</span>
-                          </div>
-                        )}
-                      </div>
-                    </ResizablePanel>
+                direction={splitDirection}
+                className="h-full"
+              >
+                {editorPanes.map((pane, index) => (
+                  <React.Fragment key={pane.id}>
+                    <ResizablePanel defaultSize={100 / editorPanes.length}>
+                      <div className="h-full flex flex-col">
+                        {/* Tab bar for this pane */}
+                        <PlaygroundTabBar
+                          paneId={pane.id}
+                          openFiles={openFiles}
+                          activeFileId={pane.activeFileId || null}
+                          setActiveFileId={setActiveFileIdForPane}
+                          closeFile={closeFileForPane}
+                        />
 
-                    {/* Secondary Pane */}
-                    {splitLayout !== 'none' && (
-                      <>
-                        <ResizableHandle withHandle />
-                        <ResizablePanel defaultSize={50} className="flex flex-col h-full min-w-[200px] min-h-[100px]">
-                          <PlaygroundTabBar
-                            openFiles={secondaryTabs}
-                            activeFileId={secondaryActiveFileId}
-                            setActiveFileId={(id) => setActiveFileId(id, 'secondary')}
-                            closeFile={(id) => closeFile(id, 'secondary')}
-                            onSplit={toggleSplitLayout}
-                            splitLayout={splitLayout}
-                            isFocused={focusedPane === 'secondary'}
-                            onFocus={() => setFocusedPane('secondary')}
-                          />
-                          <Breadcrumbs activeFile={secondaryActiveFile} templateData={templateData} />
-                          <div className="flex-1 min-h-0 relative" onClickCapture={() => setFocusedPane('secondary')}>
-                            {secondaryActiveFileId && secondaryTabs.length > 0 ? (
-                              <ErrorBoundary
-                                name="MonacoEditor-Secondary"
-                                fallback={({ reset }) => (
-                                  <div className="flex h-full items-center justify-center p-6"><Button onClick={reset}>Reload Editor</Button></div>
-                                )}
-                              >
-                                <PlaygroundEditor
-                                  activeFile={secondaryActiveFile}
-                                  content={secondaryActiveFile?.content || ""}
-                                  onContentChange={(value) => secondaryActiveFileId && updateFileContent(secondaryActiveFileId, value)}
-                                  onCursorChange={(line, col) => setCursorPosition({ line, col })}
-                                />
-                              </ErrorBoundary>
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-muted-foreground/50 text-sm">
-                                <span className="font-mono">Open a file in Secondary Pane</span>
+                        {/* Breadcrumbs for this pane */}
+                        <Breadcrumbs
+                          activeFile={openFiles.find(
+                            (f) => f.id === pane.activeFileId,
+                          )}
+                          templateData={templateData}
+                        />
+
+                        {/* Editor for this pane */}
+                        <div className="flex-1 min-h-0 h-full overflow-hidden">
+                          <ErrorBoundary
+                            name="MonacoEditor"
+                            fallback={({ reset }) => (
+                              <div className="flex h-full min-h-[200px] items-center justify-center p-6">
+                                <div className="max-w-md rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
+                                  <h3 className="mb-2 text-lg font-semibold text-destructive">
+                                    Editor crashed
+                                  </h3>
+                                  <p className="mb-4 text-sm text-muted-foreground">
+                                    The editor failed, but the rest of the
+                                    playground is still available.
+                                  </p>
+                                  <Button onClick={reset}>Reload Editor</Button>
+                                </div>
                               </div>
                             )}
-                          </div>
-                        </ResizablePanel>
-                      </>
-                    )}
-                  </ResizablePanelGroup>
-                </ResizablePanel>
-
-                {/* Preview Area */}
+                          >
+                            <div
+                              className="flex-1 min-h-0 h-full overflow-hidden"
+                              onClick={() => setActivePaneId(pane.id)}
+                            >
+                              <PlaygroundEditor
+                                activeFile={openFiles.find(
+                                  (f) => f.id === pane.activeFileId,
+                                )}
+                                content={
+                                  openFiles.find(
+                                    (f) => f.id === pane.activeFileId,
+                                  )?.content || ""
+                                }
+                                onContentChange={(value) =>
+                                  pane.activeFileId &&
+                                  updateFileContentForPane(
+                                    pane.id,
+                                    pane.activeFileId,
+                                    value,
+                                  )
+                                }
+                                onCursorChange={(line, col) =>
+                                  setCursorPosition({ line, col })
+                                }
+                              />
+                            </div>
+                          </ErrorBoundary>
+                        </div>
+                      </div>
+                    </ResizablePanel>
+                    {index < editorPanes.length - 1 && <ResizableHandle />}
+                  </React.Fragment>
+                ))}
                 {isPreviewVisible && (
                   <>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel defaultSize={50} className="min-w-[300px]">
+                    <ResizableHandle />
+                    <ResizablePanel defaultSize={30}>
                       {templateData ? (
                         <WebContainerPreview
                           templateData={templateData}
@@ -335,9 +455,13 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
                       ) : (
                         <div className="flex h-full items-center justify-center p-6 bg-muted/10">
                           {containerError ? (
-                            <p className="text-destructive text-sm font-medium">Failed to load preview container.</p>
+                            <p className="text-destructive text-sm font-medium">
+                              Failed to load preview container.
+                            </p>
                           ) : (
-                            <p className="text-muted-foreground text-sm">Loading preview environment...</p>
+                            <p className="text-muted-foreground text-sm">
+                              Loading preview environment...
+                            </p>
                           )}
                         </div>
                       )}
@@ -386,7 +510,11 @@ export const EditorArea: React.FC<EditorAreaProps> = ({
       </div>
 
       <StatusBar
-        activeFile={focusedPane === 'primary' ? activeFile : secondaryActiveFile}
+        activeFile={openFiles.find(
+          (f) =>
+            f.id ===
+            editorPanes.find((p) => p.id === activePaneId)?.activeFileId,
+        )}
         cursorPosition={cursorPosition}
         containerStatus={containerStatus}
         collaboratorCount={collaboratorCount}
